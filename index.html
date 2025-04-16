@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureNest Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .sensor-card {
+            transition: all 0.3s ease;
+        }
+        .sensor-card:hover {
+            transform: translateY(-5px);
+        }
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-gray-800">SecureNest Dashboard</h1>
+            <p class="text-gray-600">Smart Home Security Monitoring System</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <!-- Temperature Card -->
+            <div class="sensor-card bg-white rounded-lg shadow-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold">Temperature</h2>
+                    <i class="bi bi-thermometer-half text-2xl text-blue-500"></i>
+                </div>
+                <div class="text-3xl font-bold text-blue-600 mb-2" id="temperature">--°C</div>
+                <canvas id="tempChart" width="100" height="60"></canvas>
+            </div>
+
+            <!-- Humidity Card -->
+            <div class="sensor-card bg-white rounded-lg shadow-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold">Humidity</h2>
+                    <i class="bi bi-droplet-fill text-2xl text-green-500"></i>
+                </div>
+                <div class="text-3xl font-bold text-green-600 mb-2" id="humidity">--%</div>
+                <canvas id="humidityChart" width="100" height="60"></canvas>
+            </div>
+
+            <!-- Air Quality Card -->
+            <div class="sensor-card bg-white rounded-lg shadow-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold">Air Quality</h2>
+                    <i class="bi bi-wind text-2xl text-purple-500"></i>
+                </div>
+                <div class="text-3xl font-bold text-purple-600 mb-2" id="airQuality">-- PPM</div>
+                <div id="airQualityStatus" class="text-sm font-medium"></div>
+                <canvas id="airQualityChart" width="100" height="60"></canvas>
+            </div>
+
+            <!-- Motion Detection Card -->
+            <div class="sensor-card bg-white rounded-lg shadow-lg p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-semibold">Motion Status</h2>
+                    <i class="bi bi-eye-fill text-2xl text-orange-500"></i>
+                </div>
+                <div id="motionStatus" class="text-xl font-semibold mb-4">No Motion Detected</div>
+                <div id="lastMotion" class="text-sm text-gray-600">Last detected: Never</div>
+            </div>
+        </div>
+
+        <!-- RFID Access Log -->
+        <div class="mt-8 bg-white rounded-lg shadow-lg p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-2xl font-semibold">RFID Access Log</h2>
+                <button onclick="refreshData()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center">
+                    <i class="bi bi-arrow-clockwise mr-2"></i> Refresh
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rfidLog">
+                        <!-- RFID log entries will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize charts
+        const createChart = (ctx, label, color) => {
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array(10).fill(''),
+                    datasets: [{
+                        label: label,
+                        data: [],
+                        borderColor: color,
+                        tension: 0.4,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        const tempChart = createChart(document.getElementById('tempChart'), 'Temperature', '#2563eb');
+        const humidityChart = createChart(document.getElementById('humidityChart'), 'Humidity', '#16a34a');
+        const airQualityChart = createChart(document.getElementById('airQualityChart'), 'Air Quality', '#9333ea');
+
+        // Function to update charts
+        const updateChart = (chart, value) => {
+            chart.data.datasets[0].data.push(value);
+            if (chart.data.datasets[0].data.length > 10) {
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update();
+        }
+
+        // Function to get air quality status
+        const getAirQualityStatus = (ppm) => {
+            if (ppm <= 50) return ['Good', 'text-green-500'];
+            if (ppm <= 100) return ['Moderate', 'text-yellow-500'];
+            if (ppm <= 150) return ['Unhealthy for Sensitive Groups', 'text-orange-500'];
+            return ['Unhealthy', 'text-red-500'];
+        }
+
+        // Function to refresh data
+        const refreshData = async () => {
+            try {
+                const response = await fetch('https://r0c8kgwocscg8gsokogwwsw4.zetaverse.one/mongodb', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ZDPe2AN2nUTBEgIIu05wZN14BjG2',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        appSlug: 'securenest-123456',
+                        action: 'read',
+                        collection: 'sensorData',
+                        conditions: {}
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success && data.result.length > 0) {
+                    const latest = data.result[0];
+                    
+                    // Update sensor values
+                    document.getElementById('temperature').textContent = `${latest.temperature}°C`;
+                    document.getElementById('humidity').textContent = `${latest.humidity}%`;
+                    document.getElementById('airQuality').textContent = `${latest.airQuality} PPM`;
+                    
+                    // Update charts
+                    updateChart(tempChart, latest.temperature);
+                    updateChart(humidityChart, latest.humidity);
+                    updateChart(airQualityChart, latest.airQuality);
+
+                    // Update air quality status
+                    const [status, colorClass] = getAirQualityStatus(latest.airQuality);
+                    document.getElementById('airQualityStatus').className = `text-sm font-medium ${colorClass}`;
+                    document.getElementById('airQualityStatus').textContent = status;
+
+                    // Update motion status
+                    if (latest.motion) {
+                        document.getElementById('motionStatus').textContent = 'Motion Detected!';
+                        document.getElementById('motionStatus').className = 'text-xl font-semibold text-red-500';
+                        document.getElementById('lastMotion').textContent = `Last detected: ${new Date().toLocaleTimeString()}`;
+                    }
+
+                    // Update RFID log
+                    const rfidLog = document.getElementById('rfidLog');
+                    rfidLog.innerHTML = data.result
+                        .filter(entry => entry.rfid)
+                        .map(entry => `
+                            <tr class="border-t">
+                                <td class="px-6 py-4 whitespace-nowrap">${new Date(entry.timestamp).toLocaleString()}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">${entry.rfid.uid}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                        ${entry.rfid.access === 'granted' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                        ${entry.rfid.access.toUpperCase()}
+                                    </span>
+                                </td>
+                            </tr>
+                        `).join('');
+                }
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        // Initial load and set up periodic refresh
+        refreshData();
+        setInterval(refreshData, 5000);
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
